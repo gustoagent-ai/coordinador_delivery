@@ -140,8 +140,15 @@ def webhook():
         sender = msg.get("from")
 
         image = msg.get("image")
-        text = msg.get("text", {}).get("body")
 
+        # Texto puede venir como caption (imagen) o como texto normal
+        text = None
+        if image and "caption" in image:
+            text = image.get("caption")
+        else:
+            text = msg.get("text", {}).get("body")
+
+        logging.info("Caption/Text recibido: %s", text)
         # -----------------------
         # VALIDACIONES
         # -----------------------
