@@ -37,14 +37,12 @@ def send_text(to: str, text: str):
 
 
 def extract_valid_number(text: str) -> str | None:
-    """
-    SOLO acepta formato: 569XXXXXXXX (11 dígitos)
-    """
+    """ SOLO acepta formato: 569XXXXXXXX """
     if not text:
         return None
 
-    match = re.search(r'\b(569\d{8})\b', text)
-    return match.group(1) if match else None
+    match = re.search(r"\b569\d{8}\b", text)
+    return match.group(0) if match else None
 
 
 def download_media(media_id: str) -> bytes | None:
@@ -55,7 +53,7 @@ def download_media(media_id: str) -> bytes | None:
             timeout=10
         )
         r.raise_for_status()
-        media_url = r.json()["url"]
+        media_url = r.json().get("url")
 
         media = requests.get(
             media_url,
@@ -79,7 +77,7 @@ def upload_media(image_bytes: bytes) -> str | None:
             timeout=10
         )
         r.raise_for_status()
-        return r.json()["id"]
+        return r.json().get("id")
     except Exception:
         logging.exception("Error subiendo media")
         return None
@@ -113,6 +111,7 @@ def verify():
         request.args.get("hub.mode") == "subscribe"
         and request.args.get("hub.verify_token") == VERIFY_TOKEN
     ):
+        logging.info("Webhook verificado correctamente")
         return request.args.get("hub.challenge"), 200
     return "Forbidden", 403
 
@@ -120,43 +119,62 @@ def verify():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True)
+    logging.info("Evento recibido")
 
     try:
-        msg = data["entry"][0]["changes"][0]["value"]["messages"][0]
-        sender = msg["from"]
+        entry = data.get("entry", [])
+        if not entry:
+            return jsonify(ok=True), 200
+
+        changes = entry[0].get("changes", [])
+        if not changes:
+            return jsonify(ok=True), 200
+
+        value = changes[0].get("value", {})
+
+        # 🔑 Ignorar eventos sin mensajes (statuses, delivered, etc.)
+        if "messages" not in value:
+            return jsonify(ok=True), 200
+
+        msg = value["messages"][0]
+        sender = msg.get("from")
 
         image = msg.get("image")
         text = msg.get("text", {}).get("body")
 
-        # 1️⃣ Validación imagen
+        # -----------------------
+        # VALIDACIONES
+        # -----------------------
+
         if not image:
             send_text(
                 sender,
-                "❌ Debes enviar una IMAGEN junto al número de destino.\nEjemplo: 56912345678"
+                "❌ Debes enviar una IMAGEN junto al número del cliente.\nEjemplo: 56912345678"
             )
             return jsonify(ok=True), 200
 
-        # 2️⃣ Validación texto
         if not text:
             send_text(
                 sender,
-                "❌ Debes enviar el NÚMERO de destino junto a la imagen.\nEjemplo: 56912345678"
+                "❌ Debes incluir el NÚMERO del cliente junto a la imagen.\nEjemplo: 56912345678"
             )
             return jsonify(ok=True), 200
 
-        # 3️⃣ Validación número
         destination = extract_valid_number(text)
         if not destination:
             send_text(
                 sender,
-                "❌ Formato inválido.\nUsa solo: 569XXXXXXXX (11 dígitos)"
+                "❌ Formato inválido.\nUsa solo: 569XXXXXXXX"
             )
             return jsonify(ok=True), 200
 
-        # 4️⃣ Procesamiento
+        # -----------------------
+        # PROCESAMIENTO
+        # -----------------------
+
         image_bytes = download_media(image["id"])
         if not image_bytes:
-            send_text(sender, "❌ Error al procesar la imagen.")
+            send_text(sender, "❌ Error al descargar la imagen.")
             return jsonify(ok=True), 200
 
         new_media_id = upload_media(image_bytes)
@@ -166,11 +184,20 @@ def webhook():
 
         send_image(destination, new_media_id)
 
-        send_text(sender, f"✅ Imagen enviada correctamente a {destination}")
+        # -----------------------
+        # CONFIRMACIÓN
+        # -----------------------
+
+        send_text(
+            sender,
+            f"✅ Confirmación enviada correctamente.\nCliente: {destination}"
+        )
+
+        logging.info("Imagen enviada correctamente a %s", destination)
 
     except Exception:
         logging.exception("Error procesando webhook")
-        # Evitamos bucle infinito
+
     return jsonify(ok=True), 200
 
 
