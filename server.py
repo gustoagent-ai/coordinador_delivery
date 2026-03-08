@@ -1,3 +1,4 @@
+
 # server.py
 
 import os
@@ -17,12 +18,8 @@ VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 
 GRAPH_URL = "https://graph.facebook.com/v19.0"
 
-# -----------------------------------
-# CONFIG
-# -----------------------------------
-
 DELIVERY_CODE = "DELIVERYGUSTO"
-SESSION_DURATION = 180  # 3 minutos
+SESSION_DURATION = 300
 
 delivery_sessions = {}
 
@@ -31,11 +28,32 @@ delivery_sessions = {}
 # --------------------------------------------------
 
 def send_text(to: str, text: str):
+
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
         "text": {"body": text}
+    }
+
+    requests.post(
+        f"{GRAPH_URL}/{PHONE_ID}/messages",
+        headers={
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=10
+    )
+
+
+def send_image(to: str, media_id: str):
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "image",
+        "image": {"id": media_id}
     }
 
     requests.post(
@@ -55,12 +73,14 @@ def extract_valid_number(text: str):
         return None
 
     match = re.search(r"\b569\d{8}\b", text)
+
     return match.group(0) if match else None
 
 
-def download_media(media_id):
+def download_media(media_id: str):
 
     try:
+
         r = requests.get(
             f"{GRAPH_URL}/{media_id}",
             headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
@@ -109,25 +129,6 @@ def upload_media(image_bytes):
         return None
 
 
-def send_image(to, media_id):
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "image",
-        "image": {"id": media_id}
-    }
-
-    requests.post(
-        f"{GRAPH_URL}/{PHONE_ID}/messages",
-        headers={
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-            "Content-Type": "application/json"
-        },
-        json=payload,
-        timeout=10
-    )
-
 # --------------------------------------------------
 # Delivery Session
 # --------------------------------------------------
@@ -141,7 +142,7 @@ def activate_delivery(sender):
     send_text(
         sender,
         "📦 *Modo entrega activado*\n\n"
-        "Tienes 3 minutos para enviar la foto.\n\n"
+        "Tienes 5 minutos para enviar la foto.\n\n"
         "Formato:\n"
         "[imagen] + 569XXXXXXXX"
     )
@@ -160,6 +161,7 @@ def session_active(sender):
 
     return True
 
+
 # --------------------------------------------------
 # Webhook
 # --------------------------------------------------
@@ -171,7 +173,9 @@ def verify():
         request.args.get("hub.mode") == "subscribe"
         and request.args.get("hub.verify_token") == VERIFY_TOKEN
     ):
+
         logging.info("Webhook verificado correctamente")
+
         return request.args.get("hub.challenge"), 200
 
     return "Forbidden", 403
@@ -215,9 +219,23 @@ def webhook():
 
         logging.info("Mensaje recibido de %s : %s", sender, text)
 
-        # ---------------------------------------
+        # --------------------------------------------------
+        # CLIENTE ABRE SEGUIMIENTO
+        # --------------------------------------------------
+
+        if text and text.upper().startswith("SEGUIMIENTO"):
+
+            send_text(
+                sender,
+                "👋 Hola!\n\n"
+                "Te avisaremos por aquí cuando tu pedido sea entregado 📦"
+            )
+
+            return jsonify(ok=True), 200
+
+        # --------------------------------------------------
         # ACTIVACIÓN DELIVERY
-        # ---------------------------------------
+        # --------------------------------------------------
 
         if text and text.strip().upper() == DELIVERY_CODE:
 
@@ -225,23 +243,22 @@ def webhook():
 
             return jsonify(ok=True), 200
 
-        # ---------------------------------------
-        # VALIDAR SESIÓN
-        # ---------------------------------------
+        # --------------------------------------------------
+        # VALIDAR SESIÓN REPARTIDOR
+        # --------------------------------------------------
 
         if not session_active(sender):
-
             return jsonify(ok=True), 200
 
-        # ---------------------------------------
+        # --------------------------------------------------
         # VALIDACIONES
-        # ---------------------------------------
+        # --------------------------------------------------
 
         if not image:
 
             send_text(
                 sender,
-                "❌ Debes enviar una *imagen* del pedido.\n\nFormato:\n[imagen] + 569XXXXXXXX"
+                "❌ Debes enviar una imagen del pedido.\n\nFormato:\n[imagen] + 569XXXXXXXX"
             )
 
             return jsonify(ok=True), 200
@@ -266,9 +283,9 @@ def webhook():
 
             return jsonify(ok=True), 200
 
-        # ---------------------------------------
+        # --------------------------------------------------
         # PROCESAMIENTO
-        # ---------------------------------------
+        # --------------------------------------------------
 
         image_bytes = download_media(image["id"])
 
@@ -288,12 +305,8 @@ def webhook():
 
         send_text(
             destination,
-            "📦 Tu pedido fue entregado correctamente.\n\nAdjuntamos comprobante."
+            "📦 Tu pedido fue entregado.\nAdjuntamos comprobante."
         )
-
-        # ---------------------------------------
-        # CONFIRMACION
-        # ---------------------------------------
 
         send_text(
             sender,
