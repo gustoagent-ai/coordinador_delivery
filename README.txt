@@ -9,6 +9,9 @@ Infraestructura:
 
 - Meta Cloud API - Render - WhatsApp
 
+Link de entrega al cliente para seguimiento:
+https://wa.me/56953303915?text=SEGUIMIENTO
+
 Para commits (en carpeta):
 
 git init
